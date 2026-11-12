@@ -20,6 +20,8 @@ class ConnectivityApiImpl(context: Context) : ConnectivityApi {
     val hasCellular = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
     val hasVpn = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
     val isUnmetered = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    val isDataSaverRestricted =
+      connectivityManager.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED
 
     return buildList {
       if (hasWifi) add(NetworkCapability.WIFI)
@@ -34,6 +36,7 @@ class ConnectivityApiImpl(context: Context) : ConnectivityApi {
         }
       }
       if (isUnmetered) add(NetworkCapability.UNMETERED)
+      if (isDataSaverRestricted && !isUnmetered) add(NetworkCapability.CONSTRAINED)
     }
   }
 }

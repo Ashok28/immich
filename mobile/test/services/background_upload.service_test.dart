@@ -10,14 +10,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/constants/constants.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/settings_key.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/store.service.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/store.repository.dart';
+import 'package:immich_mobile/platform/connectivity_api.g.dart';
 import 'package:immich_mobile/services/background_upload.service.dart';
 import 'package:mocktail/mocktail.dart';
 
+import '../api.mocks.dart';
 import '../fixtures/asset.stub.dart';
 import '../infrastructure/repository.mock.dart';
 import '../mocks/asset_entity.mock.dart';
@@ -32,6 +35,7 @@ void main() {
   late MockBackupRepository mockBackupRepository;
   late MockAssetMediaRepository mockAssetMediaRepository;
   late MockAssetService mockAssetService;
+  late MockConnectivityApi mockConnectivityApi;
   late Drift db;
 
   setUpAll(() async {
@@ -55,6 +59,8 @@ void main() {
     mockBackupRepository = MockBackupRepository();
     mockAssetMediaRepository = MockAssetMediaRepository();
     mockAssetService = MockAssetService();
+    mockConnectivityApi = MockConnectivityApi();
+    when(() => mockConnectivityApi.getCapabilities()).thenAnswer((_) async => [NetworkCapability.wifi]);
     when(() => mockAssetService.stackEditedUpload(any(), any(), any())).thenAnswer((_) async {});
 
     sut = BackgroundUploadService(
@@ -64,6 +70,7 @@ void main() {
       mockBackupRepository,
       mockAssetMediaRepository,
       mockAssetService,
+      mockConnectivityApi,
     );
 
     mockUploadRepository.onUploadStatus = (_) {};
@@ -242,6 +249,7 @@ void main() {
         mockBackupRepository,
         mockAssetMediaRepository,
         mockAssetService,
+        mockConnectivityApi,
       );
       addTearDown(() => sutWithV24.dispose());
 
@@ -293,6 +301,7 @@ void main() {
         mockBackupRepository,
         mockAssetMediaRepository,
         mockAssetService,
+        mockConnectivityApi,
       );
       addTearDown(() => sutAndroid.dispose());
 
@@ -334,6 +343,7 @@ void main() {
         mockBackupRepository,
         mockAssetMediaRepository,
         mockAssetService,
+        mockConnectivityApi,
       );
       addTearDown(() => sutWithV24.dispose());
 
@@ -375,6 +385,7 @@ void main() {
         mockBackupRepository,
         mockAssetMediaRepository,
         mockAssetService,
+        mockConnectivityApi,
       );
       addTearDown(() => sutWithV24.dispose());
 
@@ -473,6 +484,58 @@ void main() {
 
       verify(() => mockUploadRepository.reset(kBackupLivePhotoGroup)).called(1);
       verify(() => mockUploadRepository.deleteDatabaseRecords(kBackupLivePhotoGroup)).called(1);
+    });
+  });
+
+  group('Low Data Mode', () {
+    Future<void> optOutOfLowDataMode() async {
+      await SettingsRepository.instance.write(SettingsKey.backupRespectLowDataMode, false);
+      addTearDown(() => SettingsRepository.instance.write(SettingsKey.backupRespectLowDataMode, true));
+    }
+
+    setUp(() {
+      registerFallbackValue(<UploadTask>[]);
+      when(
+        () => mockConnectivityApi.getCapabilities(),
+      ).thenAnswer((_) async => [NetworkCapability.cellular, NetworkCapability.constrained]);
+      when(() => mockStorageRepository.clearCache()).thenAnswer((_) async {});
+      when(() => mockUploadRepository.reset(any())).thenAnswer((_) async => 0);
+      when(() => mockUploadRepository.deleteDatabaseRecords(any())).thenAnswer((_) async {});
+      when(() => mockUploadRepository.getActiveTasks(any())).thenAnswer((_) async => []);
+      when(() => mockUploadRepository.start()).thenAnswer((_) async {});
+      when(() => mockBackupRepository.getCandidates(any())).thenAnswer((_) async => []);
+    });
+
+    test('does not enqueue new uploads', () async {
+      await sut.uploadBackupCandidates('user-id');
+
+      verifyZeroInteractions(mockBackupRepository);
+      verifyNever(() => mockUploadRepository.enqueueBackgroundAll(any()));
+    });
+
+    test('looks for new uploads when the user opted out', () async {
+      await optOutOfLowDataMode();
+
+      await sut.uploadBackupCandidates('user-id');
+
+      verify(() => mockBackupRepository.getCandidates('user-id')).called(1);
+    });
+
+    test('cancels queued uploads but still starts the downloader on resume', () async {
+      await sut.resume();
+
+      verify(() => mockUploadRepository.reset(kBackupGroup)).called(1);
+      verify(() => mockUploadRepository.reset(kBackupLivePhotoGroup)).called(1);
+      verify(() => mockUploadRepository.start()).called(1);
+    });
+
+    test('keeps queued uploads on resume when the user opted out', () async {
+      await optOutOfLowDataMode();
+
+      await sut.resume();
+
+      verifyNever(() => mockUploadRepository.reset(any()));
+      verify(() => mockUploadRepository.start()).called(1);
     });
   });
 }

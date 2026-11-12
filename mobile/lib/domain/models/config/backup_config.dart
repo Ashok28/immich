@@ -9,6 +9,7 @@ abstract class BackupConfig with _$BackupConfig {
     @Default(false) bool enabled,
     @Default(false) bool useCellularForVideos,
     @Default(false) bool useCellularForPhotos,
+    @Default(true) bool respectLowDataMode,
     @Default(false) bool requireCharging,
     @Default(30) int triggerDelay,
     @Default(false) bool syncAlbums,

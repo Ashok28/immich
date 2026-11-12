@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/drift.dart' hide isNotNull, isNull;
@@ -5,11 +6,14 @@ import 'package:drift/native.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
+import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/settings_key.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/store.service.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/store.repository.dart';
+import 'package:immich_mobile/platform/connectivity_api.g.dart';
 import 'package:immich_mobile/repositories/upload.repository.dart';
 import 'package:immich_mobile/services/foreground_upload.service.dart';
 import 'package:mocktail/mocktail.dart';
@@ -258,6 +262,78 @@ void main() {
       verify(() => mockAssetService.stackEditedUpload(asset.localId!, 'remote', 'sha')).called(1);
       verifyZeroInteractions(mockStorageRepository);
       verifyZeroInteractions(mockUploadRepository);
+    });
+  });
+
+  group('uploadCandidates in Low Data Mode', () {
+    const lowDataCellular = [NetworkCapability.cellular, NetworkCapability.constrained];
+    const lowDataWifi = [NetworkCapability.wifi, NetworkCapability.unmetered, NetworkCapability.constrained];
+    const wifi = [NetworkCapability.wifi, NetworkCapability.unmetered];
+
+    void stubUploadableAssets(List<LocalAsset> assets) {
+      when(() => mockBackupRepository.getCandidates(any())).thenAnswer((_) async => assets);
+      when(() => mockStorageRepository.clearCache()).thenAnswer((_) async {});
+      for (final asset in assets) {
+        final entity = MockAssetEntity();
+        when(() => entity.isLivePhoto).thenReturn(false);
+        when(() => mockStorageRepository.getAssetEntityForAsset(asset)).thenAnswer((_) async => entity);
+        when(() => mockStorageRepository.isAssetAvailableLocally(asset.id)).thenAnswer((_) async => true);
+        when(() => mockStorageRepository.getFileForAsset(asset.id)).thenAnswer((_) async => File('/${asset.name}'));
+        when(() => mockAssetMediaRepository.getOriginalFilename(asset.id)).thenAnswer((_) async => asset.name);
+      }
+    }
+
+    Future<void> optOutOfLowDataMode() async {
+      await SettingsRepository.instance.write(SettingsKey.backupRespectLowDataMode, false);
+      addTearDown(() => SettingsRepository.instance.write(SettingsKey.backupRespectLowDataMode, true));
+    }
+
+    test('pauses before touching any asset and reports the pause', () async {
+      stubUploadableAssets([LocalAssetStub.image1]);
+      when(() => mockConnectivityApi.getCapabilities()).thenAnswer((_) async => lowDataCellular);
+      var pauses = 0;
+
+      await sut.uploadCandidates(
+        'user-id',
+        Completer<void>(),
+        callbacks: UploadCallbacks(onPausedForLowDataMode: () => pauses++),
+      );
+
+      expect(pauses, equals(1));
+      verifyNever(() => mockStorageRepository.clearCache());
+      verifyZeroInteractions(mockUploadRepository);
+    });
+
+    test('uploads on a Low Data Mode Wi-Fi network when the user opted out', () async {
+      await optOutOfLowDataMode();
+      stubUploadableAssets([LocalAssetStub.image1]);
+      when(() => mockConnectivityApi.getCapabilities()).thenAnswer((_) async => lowDataWifi);
+      final captured = captureFields();
+
+      await sut.uploadCandidates('user-id', Completer<void>(), useSequentialUpload: true);
+
+      expect(captured, hasLength(1));
+    });
+
+    test('stops the run when Low Data Mode turns on mid-run', () async {
+      stubUploadableAssets([LocalAssetStub.image1, LocalAssetStub.image2]);
+      var capabilityChecks = 0;
+      when(() => mockConnectivityApi.getCapabilities()).thenAnswer((_) async {
+        capabilityChecks++;
+        return capabilityChecks <= 2 ? wifi : lowDataCellular;
+      });
+      final captured = captureFields();
+      var pauses = 0;
+
+      await sut.uploadCandidates(
+        'user-id',
+        Completer<void>(),
+        callbacks: UploadCallbacks(onPausedForLowDataMode: () => pauses++),
+        useSequentialUpload: true,
+      );
+
+      expect(captured, hasLength(1));
+      expect(pauses, equals(1));
     });
   });
 }

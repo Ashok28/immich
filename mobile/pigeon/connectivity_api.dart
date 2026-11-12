@@ -11,7 +11,7 @@ import 'package:pigeon/pigeon.dart';
     dartPackageName: 'immich_mobile',
   ),
 )
-enum NetworkCapability { cellular, wifi, vpn, unmetered }
+enum NetworkCapability { cellular, wifi, vpn, unmetered, constrained }
 
 @HostApi()
 abstract class ConnectivityApi {

@@ -1,3 +1,4 @@
+import 'package:immich_mobile/domain/models/config/backup_config.dart';
 import 'package:immich_mobile/platform/connectivity_api.g.dart';
 
 extension NetworkCapabilitiesGetters on List<NetworkCapability> {
@@ -8,4 +9,7 @@ extension NetworkCapabilitiesGetters on List<NetworkCapability> {
   // ignore: unused-code
   bool get hasVpn => contains(NetworkCapability.vpn);
   bool get isUnmetered => contains(NetworkCapability.unmetered);
+  bool get isConstrained => contains(NetworkCapability.constrained);
+
+  bool shouldPauseBackup(BackupConfig backup) => isConstrained && backup.respectLowDataMode;
 }

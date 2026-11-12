@@ -78,6 +78,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
         .toList();
 
     final error = ref.watch(backupProvider.select((p) => p.error));
+    final isPausedForLowDataMode = ref.watch(backupProvider.select((p) => p.isPausedForLowDataMode));
 
     final backupNotifier = ref.watch(backupProvider.notifier);
     final backupSyncManager = ref.watch(backgroundSyncProvider);
@@ -166,9 +167,36 @@ class _BackupPageState extends ConsumerState<BackupPage> {
                       ),
                     ),
                   },
+                  if (isPausedForLowDataMode) const _LowDataModePausedNotice(),
                   const _BackupFooter(),
                 ],
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LowDataModePausedNotice extends StatelessWidget {
+  const _LowDataModePausedNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    final color = context.colorScheme.onSurfaceVariant;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.data_saver_on_rounded, color: color),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              CurrentPlatform.isAndroid ? context.t.backup_paused_data_saver : context.t.backup_paused_low_data_mode,
+              style: context.textTheme.bodyMedium?.copyWith(color: color),
+              textAlign: TextAlign.center,
             ),
           ),
         ],

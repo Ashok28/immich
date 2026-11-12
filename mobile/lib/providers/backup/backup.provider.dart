@@ -44,6 +44,7 @@ abstract class BackupState with _$BackupState {
     @Default(BackupError.none) BackupError error,
     required Map<String, UploadStatus> uploadItems,
     @Default({}) Map<String, double> iCloudDownloadProgress,
+    @Default(false) bool isPausedForLowDataMode,
   }) = _BackupState;
 
   int get errorCount => uploadItems.values.where((item) => item.isFailed == true).length;
@@ -128,7 +129,7 @@ class BackupNotifier extends StateNotifier<BackupState> {
       stopForegroundBackup(reason: "restarting the backup");
     }
 
-    state = state.copyWith(error: BackupError.none);
+    state = state.copyWith(error: BackupError.none, isPausedForLowDataMode: false);
 
     // A pause during the recount below nulls _cancelToken, so the run keeps its own reference.
     final cancelToken = Completer<void>();
@@ -152,6 +153,7 @@ class BackupNotifier extends StateNotifier<BackupState> {
         onSuccess: _handleForegroundBackupSuccess,
         onError: _handleForegroundBackupError,
         onICloudProgress: _handleICloudProgress,
+        onPausedForLowDataMode: _handlePausedForLowDataMode,
       ),
     );
   }
@@ -163,7 +165,14 @@ class BackupNotifier extends StateNotifier<BackupState> {
     _cancelToken?.complete();
     _cancelToken = null;
     _uploadSpeedManager.clear();
-    state = state.copyWith(uploadItems: {}, iCloudDownloadProgress: {});
+    state = state.copyWith(uploadItems: {}, iCloudDownloadProgress: {}, isPausedForLowDataMode: false);
+  }
+
+  void _handlePausedForLowDataMode() {
+    if (!mounted || state.isPausedForLowDataMode) {
+      return;
+    }
+    state = state.copyWith(isPausedForLowDataMode: true);
   }
 
   void _handleICloudProgress(String localAssetId, double progress) {

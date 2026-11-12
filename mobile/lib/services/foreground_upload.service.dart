@@ -33,8 +33,15 @@ class UploadCallbacks {
   final void Function(String localId, String remoteId)? onSuccess;
   final void Function(String id, String errorMessage)? onError;
   final void Function(String id, double progress)? onICloudProgress;
+  final void Function()? onPausedForLowDataMode;
 
-  const UploadCallbacks({this.onProgress, this.onSuccess, this.onError, this.onICloudProgress});
+  const UploadCallbacks({
+    this.onProgress,
+    this.onSuccess,
+    this.onError,
+    this.onICloudProgress,
+    this.onPausedForLowDataMode,
+  });
 }
 
 final foregroundUploadServiceProvider = Provider((ref) {
@@ -95,20 +102,19 @@ class ForegroundUploadService {
     }
 
     final networkCapabilities = await _connectivityApi.getCapabilities();
-    final hasWifi = networkCapabilities.isUnmetered;
-    _logger.info('Network capabilities: $networkCapabilities, hasWifi/isUnmetered: $hasWifi');
+    _logger.info('Network capabilities: $networkCapabilities');
+
+    if (_pauseForLowDataMode(networkCapabilities, callbacks)) {
+      return;
+    }
 
     if (useSequentialUpload) {
-      await _uploadSequentially(items: candidates, cancelToken: cancelToken, hasWifi: hasWifi, callbacks: callbacks);
+      await _uploadSequentially(items: candidates, cancelToken: cancelToken, callbacks: callbacks);
     } else {
       await _executeWithWorkerPool<LocalAsset>(
         items: candidates,
         cancelToken: cancelToken,
-        shouldSkip: (asset) {
-          final requireWifi = _shouldRequireWiFi(asset);
-          return requireWifi && !hasWifi;
-        },
-        processItem: (asset) => uploadSingleAsset(asset, cancelToken, callbacks: callbacks),
+        processItem: (asset) => _uploadCandidate(asset, cancelToken, callbacks),
       );
     }
   }
@@ -117,7 +123,6 @@ class ForegroundUploadService {
   Future<void> _uploadSequentially({
     required List<LocalAsset> items,
     required Completer<void> cancelToken,
-    required bool hasWifi,
     required UploadCallbacks callbacks,
   }) async {
     await _storageRepository.clearCache();
@@ -128,14 +133,33 @@ class ForegroundUploadService {
         break;
       }
 
-      final requireWifi = _shouldRequireWiFi(asset);
-      if (requireWifi && !hasWifi) {
-        _logger.warning('Skipping upload for ${asset.id} because it requires WiFi');
-        continue;
-      }
-
-      await uploadSingleAsset(asset, cancelToken, callbacks: callbacks);
+      await _uploadCandidate(asset, cancelToken, callbacks);
     }
+  }
+
+  Future<void> _uploadCandidate(LocalAsset asset, Completer<void> cancelToken, UploadCallbacks callbacks) async {
+    final networkCapabilities = await _connectivityApi.getCapabilities();
+    if (_pauseForLowDataMode(networkCapabilities, callbacks)) {
+      return;
+    }
+
+    if (_shouldRequireWiFi(asset) && !networkCapabilities.isUnmetered) {
+      _logger.warning('Skipping upload for ${asset.id} because it requires WiFi');
+      return;
+    }
+
+    await uploadSingleAsset(asset, cancelToken, callbacks: callbacks);
+  }
+
+  bool _pauseForLowDataMode(List<NetworkCapability> networkCapabilities, UploadCallbacks callbacks) {
+    if (!networkCapabilities.shouldPauseBackup(SettingsRepository.instance.appConfig.backup)) {
+      return false;
+    }
+
+    _logger.info('Pausing backup because the system Low Data Mode / Data Saver is active');
+    shouldAbortUpload = true;
+    callbacks.onPausedForLowDataMode?.call();
+    return true;
   }
 
   /// Manually upload picked local assets
@@ -198,13 +222,11 @@ class ForegroundUploadService {
   /// [items] - List of items to process
   /// [cancelToken] - Token to cancel the operation
   /// [processItem] - Function to process each item with an HTTP client
-  /// [shouldSkip] - Optional function to skip items (e.g., WiFi requirement check)
   /// [concurrentWorkers] - Number of concurrent workers (default: 3)
   Future<void> _executeWithWorkerPool<T>({
     required List<T> items,
     required Completer<void>? cancelToken,
     required Future<void> Function(T item) processItem,
-    bool Function(T item)? shouldSkip,
     int concurrentWorkers = 3,
   }) async {
     await _storageRepository.clearCache();
@@ -224,13 +246,7 @@ class ForegroundUploadService {
         }
         currentIndex++;
 
-        final item = items[index];
-
-        if (shouldSkip?.call(item) ?? false) {
-          continue;
-        }
-
-        await processItem(item);
+        await processItem(items[index]);
       }
     }
 

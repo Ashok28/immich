@@ -22,6 +22,7 @@ class BackupOptionsPage extends ConsumerWidget {
     final previousBackup = ref.watch(appConfigProvider.select((s) => s.backup));
     final previousCellularForVideos = previousBackup.useCellularForVideos;
     final previousCellularForPhotos = previousBackup.useCellularForPhotos;
+    final previousRespectLowDataMode = previousBackup.respectLowDataMode;
     return PopScope(
       onPopInvokedWithResult: (didPop, result) async {
         // There is an issue with Flutter where the pop event
@@ -30,9 +31,11 @@ class BackupOptionsPage extends ConsumerWidget {
         final currentBackup = ref.read(appConfigProvider).backup;
         final currentCellularForVideos = currentBackup.useCellularForVideos;
         final currentCellularForPhotos = currentBackup.useCellularForPhotos;
+        final currentRespectLowDataMode = currentBackup.respectLowDataMode;
 
         if (currentCellularForVideos == previousCellularForVideos &&
-            currentCellularForPhotos == previousCellularForPhotos) {
+            currentCellularForPhotos == previousCellularForPhotos &&
+            currentRespectLowDataMode == previousRespectLowDataMode) {
           return;
         }
 

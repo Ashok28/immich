@@ -12,13 +12,16 @@ import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/asset.service.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
+import 'package:immich_mobile/extensions/network_capability_extensions.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
 import 'package:immich_mobile/infrastructure/repositories/backup.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/local_asset.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/storage.repository.dart';
+import 'package:immich_mobile/platform/connectivity_api.g.dart';
 import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/storage.provider.dart';
 import 'package:immich_mobile/repositories/asset_media.repository.dart';
 import 'package:immich_mobile/repositories/upload.repository.dart';
@@ -39,6 +42,7 @@ final backgroundUploadServiceProvider = Provider((ref) {
     db.backupRepository,
     ref.watch(assetMediaRepositoryProvider),
     ref.watch(assetServiceProvider),
+    ref.watch(connectivityApiProvider),
   );
 
   ref.onDispose(service.dispose);
@@ -93,6 +97,7 @@ class BackgroundUploadService {
     this._backupRepository,
     this._assetMediaRepository,
     this._assetService,
+    this._connectivityApi,
   ) {
     _uploadRepository.onUploadStatus = _onUploadCallback;
     _uploadRepository.onTaskProgress = _onTaskProgressCallback;
@@ -104,6 +109,7 @@ class BackgroundUploadService {
   final BackupRepository _backupRepository;
   final AssetMediaRepository _assetMediaRepository;
   final AssetService _assetService;
+  final ConnectivityApi _connectivityApi;
   final Logger _logger = Logger('BackgroundUploadService');
 
   final StreamController<TaskStatusUpdate> _taskStatusController = StreamController<TaskStatusUpdate>.broadcast();
@@ -149,6 +155,11 @@ class BackgroundUploadService {
   /// Finds backup candidates, builds upload tasks, and enqueues them
   /// for background processing.
   Future<void> uploadBackupCandidates(String userId) async {
+    if (await _shouldPauseForLowDataMode()) {
+      _logger.info("Skipping background upload because the system Low Data Mode / Data Saver is active");
+      return;
+    }
+
     await _storageRepository.clearCache();
     shouldAbortQueuingTasks = false;
 
@@ -194,8 +205,18 @@ class BackgroundUploadService {
   }
 
   /// Resume background backup processing
-  Future<void> resume() {
-    return _uploadRepository.start();
+  Future<void> resume() async {
+    if (await _shouldPauseForLowDataMode()) {
+      _logger.info("Cancelling queued background uploads because the system Low Data Mode / Data Saver is active");
+      await cancel();
+    }
+
+    await _uploadRepository.start();
+  }
+
+  Future<bool> _shouldPauseForLowDataMode() async {
+    final capabilities = await _connectivityApi.getCapabilities();
+    return capabilities.shouldPauseBackup(SettingsRepository.instance.appConfig.backup);
   }
 
   Future<void> _handleTaskStatusUpdate(TaskStatusUpdate update) async {

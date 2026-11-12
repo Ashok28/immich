@@ -48,12 +48,15 @@ class ConnectivityApiImpl: ConnectivityApi {
     // Macs) is treated as unmetered like Wi-Fi:
     // - Not on cellular
     // - Not expensive (also rules out cellular and personal hotspot)
-    // - Not constrained (Low Data Mode)
     // Note: VPN over cellular stays metered because the path is still expensive.
     let isOnCellular = path.usesInterfaceType(.cellular)
 
-    if !isOnCellular && !path.isExpensive && !path.isConstrained {
+    if !isOnCellular && !path.isExpensive {
       capabilities.append(.unmetered)
+    }
+
+    if path.isConstrained {
+      capabilities.append(.constrained)
     }
     
     return capabilities

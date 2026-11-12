@@ -128,4 +128,36 @@ void main() {
       onSuccess('asset-1', 'remote-1');
     });
   });
+
+  group('Low Data Mode pause', () {
+    void pauseOnUpload() {
+      when(() => foregroundUploadService.uploadCandidates(any(), any(), callbacks: any(named: 'callbacks'))).thenAnswer(
+        (invocation) async {
+          (invocation.namedArguments[#callbacks] as UploadCallbacks).onPausedForLowDataMode!();
+        },
+      );
+    }
+
+    test('marks the backup as paused', () async {
+      mockCounts(total: 1, remainder: 1);
+      pauseOnUpload();
+
+      await notifier.startForegroundBackup('user-1');
+
+      expect(notifier.state.isPausedForLowDataMode, isTrue);
+    });
+
+    test('clears the pause when the next run starts', () async {
+      mockCounts(total: 1, remainder: 1);
+      pauseOnUpload();
+      await notifier.startForegroundBackup('user-1');
+      when(
+        () => foregroundUploadService.uploadCandidates(any(), any(), callbacks: any(named: 'callbacks')),
+      ).thenAnswer((_) async {});
+
+      await notifier.startForegroundBackup('user-1');
+
+      expect(notifier.state.isPausedForLowDataMode, isFalse);
+    });
+  });
 }

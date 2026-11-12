@@ -26,6 +26,7 @@ class BackupSettings extends StatelessWidget {
         SettingGroupTitle(title: context.t.network_requirements, icon: Icons.cell_tower),
         const _UseCellularForVideosButton(),
         const _UseCellularForPhotosButton(),
+        const _RespectLowDataModeButton(),
         if (CurrentPlatform.isAndroid) ...[
           const Divider(),
           SettingGroupTitle(title: context.t.background_options, icon: Icons.charging_station_rounded),
@@ -205,6 +206,21 @@ class _UseCellularForPhotosButton extends StatelessWidget {
       selector: (c) => c.backup.useCellularForPhotos,
       title: context.t.photos,
       subtitle: context.t.network_requirement_photos_upload,
+    );
+  }
+}
+
+class _RespectLowDataModeButton extends StatelessWidget {
+  const _RespectLowDataModeButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final isAndroid = CurrentPlatform.isAndroid;
+    return _BackupSwitchTile(
+      metadataKey: SettingsKey.backupRespectLowDataMode,
+      selector: (c) => c.backup.respectLowDataMode,
+      title: isAndroid ? context.t.data_saver : context.t.low_data_mode,
+      subtitle: isAndroid ? context.t.network_requirement_data_saver : context.t.network_requirement_low_data_mode,
     );
   }
 }
